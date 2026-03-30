@@ -2,20 +2,38 @@ import { z } from "zod";
 import { ActionStatus } from "@/lib/types";
 
 // Definiciones utilizadas en Login
+// export const loginSchema = z.object({
+//   email: z
+//     // .string({
+//     //   message: "Name must be a string",
+//     // })
+//     // .trim()
+//     // .min(1, "El email es obligatorio")
+//     .email("Formato de email inválido"),
+//   password: z
+//     .string()
+//     .trim()
+//     .min(8, "El campo 'Password' debe tener al menos 8 caracteres")
+//     .max(32, "Solo se aceptan password de hasta 32 caracteres"),
+// });
+// export type LoginFormValues = z.infer<typeof loginSchema>;
+
 export const loginSchema = z.object({
   email: z
-    // .string({
-    //   message: "Name must be a string",
-    // })
-    // .trim()
-    // .min(1, "El email es obligatorio")
-    .email("Formato de email inválido"),
+    .string()
+    .min(1, "El email es requerido")
+    .email("Formato de email inválido")
+    .max(255, "El email no puede superar los 255 caracteres")
+    .toLowerCase()
+    .trim(),
+
   password: z
     .string()
-    .trim()
-    .min(8, "El campo 'Password' debe tener al menos 8 caracteres")
-    .max(32, "Solo se aceptan password de hasta 32 caracteres"),
+    .min(1, "La contraseña es requerida")
+    .min(8, "La contraseña debe tener al menos 8 caracteres")
+    .max(32, "La contraseña no puede superar los 32 caracteres"),
 });
+
 export type LoginFormValues = z.infer<typeof loginSchema>;
 
 export type LoginState =

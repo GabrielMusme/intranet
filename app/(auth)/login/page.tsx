@@ -8,7 +8,7 @@ import LandingForm from "@/components/ui/custom/landing-form";
 export default async function LoginPage() {
   // Redirige si ya está autenticado
   const session = await auth();
-  console.log("Session in login page: ", session);
+  // console.log("Session in login page: ", session);
   if (session) {
     redirect(LOGIN_DEFAULT_REDIRECT);
   }

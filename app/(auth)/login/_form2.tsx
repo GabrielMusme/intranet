@@ -1,85 +1,108 @@
 "use client";
 
-import React, { useActionState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { loginAction } from "../_actions";
 import { LOGIN_DEFAULT_REDIRECT } from "@/lib/constants";
-import { ActionStatus } from "@/lib/types";
-import { LoginState } from "@/schemas/auth.schemas";
-// import { useToast } from "@/hooks/use-toast";
-import { toast } from "sonner";
+
 import Link from "next/link";
 import { AuthInput } from "@/components/ui/custom/authInput";
 
-const initialState: LoginState = {
-  status: ActionStatus.IDLE,
-  values: {
-    email: "",
-    password: "",
-  },
-};
+import { useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+
+import { loginSchema, type LoginFormValues } from "@/schemas/auth.schemas";
+
 
 export default function LoginForm() {
+  
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl");
 
-  const [state, formAction, pending] = useActionState(
-    loginAction,
-    initialState
-  );
-  // const { toast } = useToast();
+  const [isPending, startTransition] = useTransition();
+  // const [showPassword, setShowPassword] = useState(false);
 
-  useEffect(() => {
-    if (state.status === ActionStatus.SUCCESS) {
-      const href = callbackUrl || LOGIN_DEFAULT_REDIRECT;
-      console.log("redirecting to: ", href);
-      router.push(href);
-    }
-    console.log("Estado en useEfect de formulario login: ", state);
-    if (state.status === ActionStatus.ERROR) {
-      toast.error("No fue posible validar tus credenciales.", {
-        description: "Por favor verifica tu email y contraseña",
-      });
-    }
-  }, [state, router]);
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors },
+  } = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "" },
+    mode: "onTouched", // Validar al salir del campo
+  });
+
+  const onSubmit = (values: LoginFormValues) => {
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("email", values.email);
+      formData.set("password", values.password);
+
+      const result = await loginAction(
+        {
+          status:  "IDLE" as never,
+          values,
+        },
+        formData
+      );
+
+      if (result.status === "SUCCESS") {
+        toast.success("¡Bienvenido!", {
+          description: "Sesión iniciada correctamente.",
+        });
+        router.push(callbackUrl || LOGIN_DEFAULT_REDIRECT);
+        router.refresh();
+      } else if (result.status === "VALIDATION_ERROR") {
+        Object.entries(result.error).forEach(([field, message]) => {
+          if (!message) return;
+          setError(field as keyof LoginFormValues, {
+            type: "server",
+            message,
+          });
+        });
+
+        console.log("[LoginForm] Errores de validación del servidor:", errors);
+        toast.error("Error de validación", {
+          description: "Por favor corrige los errores en el formulario.",
+        });
+      } else if (result.status === "ERROR") {
+        toast.error("Error de autenticación", {
+          description: result.error.general,
+        });
+      } else {
+        toast.error("Error de autenticación", {
+          description: "No fue posible iniciar sesión.",
+        });
+      }
+    });
+  };
 
   return (
     <>
       {/* { state.status === ActionStatus.ERROR && state.error?.general && (<p className="text-red-500 text-sm">{state.error.general}</p>)} */}
       <form
-        action={formAction}
+        onSubmit={handleSubmit(onSubmit)}
         className="mt-6 flex flex-col"
-        autoComplete="off"
+        noValidate
+        aria-label="Formulario de inicio de sesión"
       >
         <AuthInput
           type="email"
           id="email"
-          name="email"
-          defaultValue={state.values?.email}
-          errorMessage={
-            state.status === ActionStatus.VALIDATION_ERROR && state.error?.email
-              ? state.error.email[0]
-              : ""
-          }
+          {...register("email")}
+          errorMessage={errors.email?.message}
         />
 
         <AuthInput
           type="password"
           id="password"
-          name="password"
-          defaultValue={state.values?.password}
           placeholder="Contraseña"
-          errorMessage={
-            state.status === ActionStatus.VALIDATION_ERROR &&
-            state.error?.password
-              ? state.error.password[0]
-              : ""
-          }
+          {...register("password")}
+          errorMessage={errors.password?.message}
         />
-
-        {/* {state.status === ActionStatus.ERROR && <p>{state.error.general}</p>}
-      {state.status === ActionStatus.SERVER_ERROR && <p>{state.error.general}</p>} */}
 
         <div className="mb-2 relative">
           <input
@@ -91,8 +114,8 @@ export default function LoginForm() {
               borderRadius: "999px",
               color: "#fff",
             }}
-            value={pending ? "Ingresando ..." : "Ingresar"}
-            disabled={pending}
+            value={isPending ? "Ingresando ..." : "Ingresar"}
+            disabled={isPending}
           />
         </div>
         <RegisterLink />

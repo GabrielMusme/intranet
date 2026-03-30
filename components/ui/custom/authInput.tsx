@@ -11,6 +11,8 @@ export function AuthInput({
 }: AuthInputProps) {
   const inputType = inputProps.type === "submit" ? "text-white bg-gradient-to-br from-[#7cadb3] to-[#275273] hover:from-[#86b7bd] hover:to-[#315c7d] cursor-pointer" : "bg-white/30 hover:bg-white/50 focus:bg-white/50";
 
+  const errMsg = errorMessage ? errorMessage : "";
+
   return (
     <div className="mb-2 relative">
       <input
@@ -30,7 +32,7 @@ export function AuthInput({
           wordWrap: "break-word", // Permite que las palabras largas se dividan en varias líneas
         }}
       >
-        {errorMessage}
+        {errMsg}
       </p>
     </div>
   );

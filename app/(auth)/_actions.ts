@@ -1,8 +1,11 @@
 "use server";
 
 import bcryptjs from "bcryptjs";
+import { z } from "zod";
 import { auth, signIn } from "@/auth";
-import dbPool, { ResultSetHeader } from "@/lib/db";
+import { AuthError } from "next-auth";
+import { db } from "@/lib/db";
+import type { ResultSetHeader } from "@/lib/db";
 import { ActionStatus } from "@/lib/types";
 import { MEMBER_STATUS_ACTIVE } from "@/lib/constants";
 import {
@@ -12,50 +15,144 @@ import {
   AuthUser,
   RoleResult,
   LoginState,
+  LoginFormValues,
+  loginSchema,
 } from "@/schemas/auth.schemas";
 import { checkExistCmp } from "@/lib/intema.actions";
 
+// export async function loginAction(
+//   _state: any,
+//   formData: FormData
+// ): Promise<LoginState> {
+//   const formEmail = formData.get("email") as string;
+//   const formPassword = formData.get("password") as string;
+//   const { success, data, error } = loginSchema.safeParse({ formEmail, formPassword });
+//   if (!success) {
+//     console.log("Error de validacion: ", error.flatten().fieldErrors);
+//     return {
+//       status: ActionStatus.VALIDATION_ERROR,
+//       error: error.flatten().fieldErrors,
+//       values: { email: formEmail, password: formPassword },
+//     }
+//     // throw new LoginValidationError(
+//     //   "Validation error",
+//     //   error.flatten().fieldErrors
+//     // );
+//   }
+//   const { email, password } = data;
+//   console.log("Validando credenciales para:", email);
+  
+//   try {
+//     await signIn("credentials", {
+//       email,
+//       password,
+//       redirect: false,
+//     });
+//     return {
+//       status: ActionStatus.SUCCESS,
+//       values: { email, password },
+//     };
+//   } catch (error: any) {
+//     console.log("Error en server action: ", error);
+//     switch (error.type) {
+//       case "CredentialsSignin":
+//         return {
+//           status: ActionStatus.ERROR,
+//           error: { general: "Usuario o contraseña NO validas" },
+//           values: { email, password },
+//         };
+//       case "AuthError":
+//         return {
+//           status: ActionStatus.VALIDATION_ERROR,
+//           error: error.validation,
+//           values: { email, password },
+//         };
+//       default:
+//         return {
+//           status: ActionStatus.ERROR,
+//           error: { general: "Error inesperado" },
+//           values: { email, password },
+//         };
+//     }
+//   }
+// }
 export async function loginAction(
-  _state: any,
+  _state: LoginState,
   formData: FormData
 ): Promise<LoginState> {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  const values: LoginFormValues = {
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    // password: String(formData.get("password")?.slice(0, 5) ?? ""),
+  };
+
+  const parsed = loginSchema.safeParse(values);
+
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    return {
+      status: ActionStatus.VALIDATION_ERROR,
+      error: {
+        email: fieldErrors.email?.[0] ?? "",
+        password: fieldErrors.password?.[0] ?? "",
+      },
+      values,
+    };
+  }
+
+  const { email, password } = parsed.data;
+
   try {
     await signIn("credentials", {
       email,
       password,
       redirect: false,
     });
+
     return {
       status: ActionStatus.SUCCESS,
       values: { email, password },
     };
-  } catch (error: any) {
-    console.log("Error en server action: ", error);
-    switch (error.type) {
-      case "CredentialsSignin":
-        return {
-          status: ActionStatus.ERROR,
-          error: { general: "Usuario o contraseña NO validas" },
-          values: { email, password },
-        };
-      case "AuthError":
-        return {
-          status: ActionStatus.VALIDATION_ERROR,
-          error: error.validation,
-          values: { email, password },
-        };
-      default:
-        return {
-          status: ActionStatus.ERROR,
-          error: { general: "Error inesperado" },
-          values: { email, password },
-        };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      switch (error.type) {
+        case "CredentialsSignin":
+        case "CallbackRouteError":
+          return {
+            status: ActionStatus.ERROR,
+            error: {
+              general: "Credenciales incorrectas. Verifica tu email y contraseña.",
+            },
+            values: { email, password },
+          };
+        default:
+          return {
+            status: ActionStatus.ERROR,
+            error: {
+              general: "Ocurrió un error inesperado. Intenta de nuevo.",
+            },
+            values: { email, password },
+          };
+      }
     }
+
+    if (error instanceof Error && error.message.includes("NEXT_REDIRECT")) {
+      throw error;
+    }
+
+    console.error("[loginAction] Error inesperado:", error);
+    return {
+      status: ActionStatus.ERROR,
+      error: {
+        general: "Error interno del servidor. Intenta de nuevo más tarde.",
+      },
+      values: { email, password },
+    };
   }
 }
 
+
+//Revisar lógicamente el flujo de esta función, ya que hace referencia a tablas del esquema antiguo (intraIntema) y no al nuevo esquema de Prueba3. Migrar a las tablas equivalentes de Prueba3 cuando estén definidas.
 export async function signupAction(
   _state: any,
   formData: FormData
@@ -79,7 +176,8 @@ export async function signupAction(
   if (!validationResult.success) {
     // Transformar los errores de Zod en un objeto clave-valor
     const errorObj: Record<string, string> = {};
-    validationResult.error.errors.forEach((err) => {
+    const zErrors = (validationResult.error as any).errors as Array<any>;
+    zErrors.forEach((err) => {
       errorObj[err.path[0]] = err.message;
     });
     return {
@@ -89,14 +187,15 @@ export async function signupAction(
     };
   }
 
-  const intemaPool = dbPool("intraIntema");
-  const conn = await intemaPool.getConnection();
+  // TODO: signupAction referencia tablas del esquema antiguo (intraIntema).
+  //       Migrar INSERT a la tabla members/users2 de Prueba3.
+  const conn = await db.getConnection();
 
   try {
     const existEmail = await checkExistCmp(
       "member",
       "email",
-      `'${validationResult.data.email}'`
+      validationResult.data.email
     );
     if (existEmail) {
       console.log("Email duplicado !!!");
@@ -108,8 +207,8 @@ export async function signupAction(
     }
 
     const insertMember = `
-      INSERT INTO member
-      (lastName, firstName, email, password, groupId, stateId)
+      INSERT INTO members
+      (last_name, first_name, email, password, groupId, stateId)
       VALUES (?, ?, ?, ?, ?, ?)
     `;
 
@@ -184,58 +283,85 @@ export async function signupAction(
   }
 }
 
-export async function authenticateMember(
-  email: string,
-  password: string
-): Promise<AuthUser | null> {
-  // Aseguramos que esta acción se ejecute en el entorno Node.js completo
-  if (process.env.NEXT_RUNTIME === "edge") {
-    throw new Error("This action must be executed in a Node.js environment");
-  }
+import { isAllowedLogin, incrFailedLogin, resetFailedLogin } from "@/lib/rateLimiter";
+import { logAuthEvent } from "@/lib/authAudit";
+// import { LoginValidationError } from "@/lib/nextAuthConfig";
 
-  const intemaPool = dbPool("intraIntema");
-  const connection = await intemaPool.getConnection();
+// export async function authenticateMember(
+//   email: string,
+//   password: string
+// ): Promise<AuthUser | null> {
+//   // Aseguramos que esta acción se ejecute en el entorno Node.js completo
+//   if (process.env.NEXT_RUNTIME === "edge") {
+//     throw new Error("This action must be executed in a Node.js environment");
+//   }
 
-  try {
-    const [memberRows] = (await connection.execute(
-      "SELECT id, lastName, firstName, email, password, stateId  FROM member WHERE email = ?",
-      [email]
-    )) as [DbUser[], any];
+//   // TODO: authenticateMember es legacy (intraIntema). El flujo activo usa getUserByEmail en nextAuthConfig.ts.
+//   const connection = await db.getConnection();
 
-    if (Array.isArray(memberRows) && memberRows.length > 0) {
-      const member: DbUser = memberRows[0];
-      if (member.stateId !== MEMBER_STATUS_ACTIVE) {
-        console.log("Usuario no activo:", member);
-        return null;
-      }
-      const passwordMatch = await bcryptjs.compare(password, member.password);
-      if (!passwordMatch) {
-        return null;
-      }
+//   try {
+//     // Rate limit: verificar con Upstash @upstash/ratelimit si está disponible
+//     const MAX_ATTEMPTS = 5;
+//     const WINDOW_SECONDS = 5 * 60; // 5 minutos
+//     const allowed = await isAllowedLogin(email, MAX_ATTEMPTS, WINDOW_SECONDS);
+//     if (!allowed.allowed) {
+//       console.warn(`Bloqueado por demasiados intentos (ratelimit): ${email}`);
+//       await logAuthEvent("failed", null, email, { reason: "blocked_too_many_attempts", attempts: allowed.limit - (allowed.remaining ?? 0) });
+//       return null;
+//     }
 
-      const [rows] = (await connection.execute(
-        "SELECT member_role.memberId, role.name FROM member_role LEFT JOIN role ON member_role.roleId = role.id WHERE member_role.memberId = ?",
-        [member.id]
-      )) as [RoleResult[], any];
-      const roles: RoleResult[] = rows;
+//     const [memberRows] = (await connection.execute(
+//       "SELECT id, lastName, firstName, email, password, stateId  FROM member WHERE email = ?",
+//       [email]
+//     )) as [DbUser[], any];
 
-      const userData: AuthUser = {
-        id: member.id,
-        lastName: member.lastName,
-        firstName: member.firstName,
-        email: member.email,
-        stateId: member.stateId,
-        role: roles.map((role) => role.name),
-      };
-      return userData;
-    } else {
-      return null;
-    }
-  } catch (error) {
-    console.error("Error de autenticación:", error);
-    throw new Error("Error de autenticación");
-  } finally {
-    // await connection.end()
-    connection.release();
-  }
-}
+//     if (Array.isArray(memberRows) && memberRows.length > 0) {
+//       const member: DbUser = memberRows[0];
+//       if (member.stateId !== MEMBER_STATUS_ACTIVE) {
+//         console.log("Usuario no activo:", member);
+//         await logAuthEvent("failed", member.id, email, { reason: "not_active" });
+//         return null;
+//       }
+//       const passwordMatch = await bcryptjs.compare(password, member.password);
+//       if (!passwordMatch) {
+//         // incrementar contador de intentos fallidos
+//         const count = await incrFailedLogin(email, WINDOW_SECONDS);
+//         console.log(`Intento fallido ${count} para ${email}`);
+//         await logAuthEvent("failed", member.id, email, { reason: "invalid_password", attempts: count });
+//         return null;
+//       }
+
+//       // autenticación correcta: resetear contador y log
+//       await resetFailedLogin(email);
+
+//       const [rows] = (await connection.execute(
+//         "SELECT member_role.memberId, role.name FROM member_role LEFT JOIN role ON member_role.roleId = role.id WHERE member_role.memberId = ?",
+//         [member.id]
+//       )) as [RoleResult[], any];
+//       const roles: RoleResult[] = rows;
+
+//       const userData: AuthUser = {
+//         id: member.id,
+//         lastName: member.lastName,
+//         firstName: member.firstName,
+//         email: member.email,
+//         stateId: member.stateId,
+//         role: roles.map((role) => role.name),
+//       };
+
+//       await logAuthEvent("success", member.id, email, { reason: "authenticated" });
+//       return userData;
+//     } else {
+//       // usuario no encontrado: incrementar contador también para evitar enumeración
+//       const count = await incrFailedLogin(email, WINDOW_SECONDS);
+//       await logAuthEvent("failed", null, email, { reason: "not_found", attempts: count });
+//       return null;
+//     }
+//   } catch (error) {
+//     console.error("Error de autenticación:", error);
+//     throw new Error("Error de autenticación");
+//   } finally {
+//     // await connection.end()
+//     connection.release();
+//   }
+// }
